@@ -15,10 +15,12 @@ function App() {
   const [time, setTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSolved, setIsSolved] = useState(false);
+  const [showWinCard, setShowWinCard] = useState(false);
   const [tileImages, setTileImages] = useState([]);
   const [showNumbers, setShowNumbers] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const timerRef = useRef(null);
+  const winCardTimerRef = useRef(null);
   const fileInputRef = useRef(null);
   const gameRef = useRef(null);
 
@@ -30,7 +32,7 @@ function App() {
     const srcTileW = img.width / size;
     const srcTileH = img.height / size;
 
-    for (let i = 0; i < totalTiles - 1; i++) {
+    for (let i = 0; i < totalTiles; i++) {
       const row = Math.floor(i / size);
       const col = i % size;
       const canvas = document.createElement("canvas");
@@ -104,6 +106,8 @@ function App() {
     setTime(0);
     setIsPlaying(true);
     setIsSolved(false);
+    setShowWinCard(false);
+    if (winCardTimerRef.current) clearTimeout(winCardTimerRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => setTime((t) => t + 1), 1000);
     setTimeout(() => gameRef.current?.focus(), 100);
@@ -135,6 +139,9 @@ function App() {
         setIsSolved(true);
         setIsPlaying(false);
         if (timerRef.current) clearInterval(timerRef.current);
+        // Let the player admire the completed image before showing the card.
+        if (winCardTimerRef.current) clearTimeout(winCardTimerRef.current);
+        winCardTimerRef.current = setTimeout(() => setShowWinCard(true), 1800);
       }
     },
     [isPlaying, isSolved, tiles, emptyIndex, gridSize, checkSolved]
@@ -208,9 +215,11 @@ function App() {
       setTileImages(generateTileImages(image, gridSize));
       setIsPlaying(false);
       setIsSolved(false);
+      setShowWinCard(false);
       setTiles([]);
       setMoves(0);
       setTime(0);
+      if (winCardTimerRef.current) clearTimeout(winCardTimerRef.current);
       if (timerRef.current) clearInterval(timerRef.current);
     }
   }, [gridSize, image, generateTileImages]);
@@ -219,6 +228,7 @@ function App() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (winCardTimerRef.current) clearTimeout(winCardTimerRef.current);
     };
   }, []);
 
@@ -368,11 +378,32 @@ function App() {
             }}
           >
             {tiles.map((tile, index) => {
-              if (tile === 0) return null;
               const row = Math.floor(index / gridSize);
               const col = index % gridSize;
               const x = col * (tileSize + tileGap) + tileGap;
               const y = row * (tileSize + tileGap) + tileGap;
+
+              // The empty slot: once solved, fill it with its piece so the
+              // completed picture is shown in full.
+              if (tile === 0) {
+                if (!isSolved) return null;
+                return (
+                  <div
+                    key="last-piece"
+                    className="absolute rounded-lg overflow-hidden shadow-md"
+                    style={{
+                      width: tileSize,
+                      height: tileSize,
+                      left: x,
+                      top: y,
+                      backgroundImage: `url(${tileImages[gridSize * gridSize - 1]})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
+                      animation: "fadeInPiece 0.6s ease",
+                    }}
+                  />
+                );
+              }
 
               return (
                 <div
@@ -400,17 +431,34 @@ function App() {
               );
             })}
 
-            {/* Win overlay */}
+            {/* Win badge — appears immediately, does not obscure the picture */}
             {isSolved && (
-              <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center rounded-2xl backdrop-blur-sm z-10">
-                <div className="text-4xl mb-2">🎉</div>
-                <p className="text-white text-xl font-bold mb-1">恭喜完成！</p>
-                <p className="text-white/70 text-sm">
+              <div
+                className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-green-500/90 text-white text-xs font-bold px-2.5 py-1 rounded-full shadow-lg"
+                style={{ animation: "fadeInPiece 0.4s ease" }}
+              >
+                <span>✓</span>
+                <span>完成</span>
+              </div>
+            )}
+
+            {/* Delayed congratulations banner — only covers the bottom strip */}
+            {showWinCard && (
+              <div
+                className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-1 px-4 pt-10 pb-4 rounded-b-2xl"
+                style={{
+                  background:
+                    "linear-gradient(to top, rgba(20,20,46,0.92) 30%, rgba(20,20,46,0.6) 70%, rgba(20,20,46,0))",
+                  animation: "slideUpCard 0.5s ease",
+                }}
+              >
+                <p className="text-white text-lg font-bold">🎉 恭喜完成！</p>
+                <p className="text-white/70 text-xs mb-2">
                   用了 {moves} 步，耗时 {formatTime(time)}
                 </p>
                 <button
                   onClick={startGame}
-                  className="mt-4 px-5 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg font-medium transition-all"
+                  className="px-5 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg font-medium transition-all shadow-lg"
                 >
                   再来一局
                 </button>
