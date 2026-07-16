@@ -16,11 +16,14 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSolved, setIsSolved] = useState(false);
   const [showWinCard, setShowWinCard] = useState(false);
+  const [defaultImgFailed, setDefaultImgFailed] = useState(false);
   const [tileImages, setTileImages] = useState([]);
   const [showNumbers, setShowNumbers] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const timerRef = useRef(null);
   const winCardTimerRef = useRef(null);
+  const userChoseImageRef = useRef(false);
+  const defaultImgTimerRef = useRef(null);
   const fileInputRef = useRef(null);
   const gameRef = useRef(null);
 
@@ -181,6 +184,13 @@ function App() {
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    // Mark that the user has chosen their own image FIRST (synchronously), so
+    // any still-downloading default image can no longer overwrite it, and stop
+    // any pending default-image retry.
+    userChoseImageRef.current = true;
+    if (defaultImgTimerRef.current) clearTimeout(defaultImgTimerRef.current);
+    setDefaultImgFailed(false);
+
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
@@ -190,23 +200,56 @@ function App() {
         setTileImages(generateTileImages(img, gridSize));
         setIsPlaying(false);
         setIsSolved(false);
+        setShowWinCard(false);
         setTiles([]);
         if (timerRef.current) clearInterval(timerRef.current);
+      };
+      img.onerror = () => {
+        alert("图片加载失败，请换一张图片试试");
       };
       img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
   };
 
-  // Load default image on mount
+  // Load default image on mount (guarded against races + with retry)
   useEffect(() => {
-    const img = new Image();
-    img.onload = () => {
-      setImage(img);
-      setPreviewImage("/cute-kitten.png");
-      setTileImages(generateTileImages(img, gridSize));
+    let cancelled = false;
+    let attempt = 0;
+    const maxAttempts = 3;
+
+    const tryLoad = () => {
+      // Never overwrite a user-chosen image, and stop if unmounted.
+      if (cancelled || userChoseImageRef.current) return;
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled || userChoseImageRef.current) return;
+        setImage(img);
+        setPreviewImage("/cute-kitten.jpg");
+        setTileImages(generateTileImages(img, gridSize));
+        setDefaultImgFailed(false);
+      };
+      img.onerror = () => {
+        if (cancelled || userChoseImageRef.current) return;
+        attempt += 1;
+        if (attempt < maxAttempts) {
+          defaultImgTimerRef.current = setTimeout(tryLoad, 800 * attempt);
+        } else {
+          setDefaultImgFailed(true);
+        }
+      };
+      // Cache-bust on retries to avoid a cached failed/partial response.
+      img.src = attempt === 0 ? "/cute-kitten.jpg" : `/cute-kitten.jpg?r=${attempt}`;
     };
-    img.src = "/cute-kitten.png";
+
+    tryLoad();
+
+    return () => {
+      cancelled = true;
+      if (defaultImgTimerRef.current) clearTimeout(defaultImgTimerRef.current);
+    };
+    // Run once on mount; grid-size changes are handled by the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Regenerate tile images when grid size changes
@@ -329,20 +372,31 @@ function App() {
             style={{ width: boardSize, height: boardSize }}
             onClick={() => fileInputRef.current?.click()}
           >
-            <svg
-              className="w-16 h-16 text-white/40 mb-3"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-              />
-            </svg>
-            <p className="text-white/50 text-sm">点击上传图片开始游戏</p>
+            {defaultImgFailed ? (
+              <>
+                <svg
+                  className="w-16 h-16 text-white/40 mb-3"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+                <p className="text-white/60 text-sm">默认图片加载失败</p>
+                <p className="text-white/40 text-xs mt-1">点击上传一张图片开始游戏</p>
+              </>
+            ) : (
+              <>
+                <div className="w-10 h-10 mb-3 border-2 border-white/20 border-t-purple-400 rounded-full animate-spin" />
+                <p className="text-white/50 text-sm">默认图片加载中…</p>
+                <p className="text-white/40 text-xs mt-1">也可点击这里上传自己的图片</p>
+              </>
+            )}
           </div>
         )}
 
